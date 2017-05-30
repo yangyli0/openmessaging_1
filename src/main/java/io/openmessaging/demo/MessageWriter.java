@@ -26,21 +26,21 @@ public class MessageWriter implements Runnable {
     private final int MQ_CAPACITY = 10000;
     private String producerId;
     private BlockingQueue<Message> mq;
-    //private ByteBuffer indexBuf;
-    //private Map<String, FileChannel> indexTable;
+    private ByteBuffer indexBuf;
+    private Map<String, FileChannel> indexTable;
     private long fileCursor = 0;
     private MappedByteBuffer messageBuf;
     private FileChannel messageChannel;
     private String STORE_PATH;
-    //private long seat = 0;
+    private long seat = 0;
 
     public MessageWriter(String store_path) {
         this.STORE_PATH = store_path;
         mq = new LinkedBlockingQueue<>(MQ_CAPACITY);
-        /*
+
         indexTable = new HashMap<>();
         indexBuf = ByteBuffer.allocate(130);
-        */
+
     }
     public void run() {
         producerId = Thread.currentThread().getName();
@@ -68,10 +68,10 @@ public class MessageWriter implements Runnable {
                     queueOrTopic = header.getString(MessageHeader.TOPIC);
 
                 queueOrTopic = queueOrTopic.substring(1);
-                /*
+
                 if (!indexTable.containsKey(queueOrTopic))
                     createIndexFile(queueOrTopic);
-                 */
+
 
                 byte[] propertyBytes = getKvsBytes(property);
                 byte[] headerBytes = getKvsBytes(header);
@@ -81,12 +81,12 @@ public class MessageWriter implements Runnable {
                 fill(body, 'b');
 
                 // add index
-                /*
+
                 long start = seat;
                 int offset = propertyBytes.length + headerBytes.length + body.length;
                 addIndex(queueOrTopic, start, offset);
                 seat += offset + 1; // 跳过'\n'
-                */
+
 
 
             } catch (InterruptedException e) { e.printStackTrace();}
@@ -126,7 +126,6 @@ public class MessageWriter implements Runnable {
         }
     }
 
-    /*
     public void createIndexFile(String bucket) {
         String absPath = STORE_PATH+"/" + producerId + "_" + bucket;
         RandomAccessFile raf = null;
@@ -136,19 +135,26 @@ public class MessageWriter implements Runnable {
             indexTable.put(bucket, fc);
         } catch (IOException e) { e.printStackTrace();}
     }
-    */
+
 
     public byte[] getKvsBytes(KeyValue kvs) {
         return ((DefaultKeyValue)kvs).getBytes();
     }
 
-    /*
-    public void addIndex(String bucket, long start, int offset) {
 
+    public void addIndex(String bucket, long start, int offset) {
+        /*
+        byte[] startBytes = Long.toString(start).getBytes();
+        byte[] endBytes = Long.toString(start+offset).getBytes();
+        indexBuf.put(startBytes);
+        indexBuf.put((byte)('#'));
+        indexBuf.put(endBytes);
+        */
 
         indexBuf.putLong(start);
         indexBuf.put((byte)('#'));
         indexBuf.putLong(start + offset);
+
         indexBuf.put((byte)('\n'));
         indexBuf.flip();
 
@@ -158,7 +164,7 @@ public class MessageWriter implements Runnable {
         } catch (IOException e) { e.printStackTrace();}
         indexBuf.clear();
     }
-    */
+
 
     public void addMessage(Message message) {
         try {
