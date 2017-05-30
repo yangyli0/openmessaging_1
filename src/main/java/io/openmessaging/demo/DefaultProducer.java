@@ -2,7 +2,9 @@ package io.openmessaging.demo;
 
 import io.openmessaging.*;
 
+import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Created by lee on 5/16/17.
@@ -10,11 +12,16 @@ import java.util.Map;
 public class DefaultProducer implements Producer {
     private DefaultMessageFactory messageFactory = new DefaultMessageFactory();
     private KeyValue properties;
-    private MessageStore messageStore;
+
+    private MessageWriter messageWriter;
+
+
 
     public DefaultProducer(KeyValue properties) {
         this.properties = properties;
-        messageStore = MessageStore.getInstance(properties);
+        String storePath = properties.getString("STORE_PATH");
+        messageWriter = new MessageWriter(storePath);
+        new Thread(messageWriter).start();
     }
     @Override public BytesMessage createBytesMessageToTopic(String topic, byte[] body) {
         return messageFactory.createBytesMessageToTopic(topic, body);
@@ -23,12 +30,7 @@ public class DefaultProducer implements Producer {
         return messageFactory.createBytesMessageToQueue(queue, body);
     }
 
-    public void flush() {
-        // 清空队列和缸里的消息, 所有线程都会调用
-        //send(createBytesMessageToTopic("end", "end".getBytes()));
-        messageStore.finishCount();
 
-    }
 
     @Override public void start() {}
 
@@ -36,8 +38,12 @@ public class DefaultProducer implements Producer {
 
     @Override public KeyValue properties() { return properties; }
 
-    //@Override public synchronized void send(Message message) { messageStore.putMessage(message);}
-    @Override public void send(Message message) { messageStore.putMessage(message); }
+
+
+    @Override public void send(Message message) {
+        messageWriter.addMessage(message);
+    }
+
     @Override public void send(Message message, KeyValue properties) {
         throw new UnsupportedOperationException("Unsupported");
     }
@@ -64,5 +70,10 @@ public class DefaultProducer implements Producer {
 
     @Override public BatchToPartition createBatchToPartition(String partitionName, KeyValue properties) {
         throw new UnsupportedOperationException("Unsupported");
+    }
+
+    public void flush() {
+        Message FIN = messageFactory.createBytesMessageToQueue("", "".getBytes());
+        send(FIN);
     }
 }

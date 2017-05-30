@@ -1,17 +1,17 @@
 package io.openmessaging.demo;
 
-import io.openmessaging.BytesMessage;
-import io.openmessaging.KeyValue;
-import io.openmessaging.Message;
-import io.openmessaging.MessageHeader;
+import io.openmessaging.*;
 
 
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
+import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -19,235 +19,151 @@ import java.util.concurrent.LinkedBlockingQueue;
 /**
  * Created by lee on 5/16/17.
  */
+
+
 public class MessageWriter implements Runnable {
-    KeyValue properties;
-    String fileName;
-    BlockingQueue<Message> mq;
-    private int BUFFER_SIZE =   16 * 1024 * 1024;    //TODO:待调整
-    private int MQ_CAPACITY = 10000;    //TODO: 待调整
-    //private int MQ_CAPACITY = 9000;
-    private byte[] bytesJar;  // 缓存消息
-    private int jarCursor = 0; // bytesJar中游标当前位置 数组下标不能超过最大整数
-    private long fileCursor = 0;    // 文件中游标的当前位置
-    //private int JAR_SIZE = 4 * 1024 * 1024;
+    private final int BUFFER_SIZE =  256 * 1024 * 1024;
+    private final int MQ_CAPACITY = 10000;
+    private String producerId;
+    private BlockingQueue<Message> mq;
+    private ByteBuffer indexBuf;
+    private Map<String, FileChannel> indexTable;
+    private long fileCursor = 0;
+    private MappedByteBuffer messageBuf;
+    private FileChannel messageChannel;
+    private String STORE_PATH;
+    private long seat = 0;
 
-    MappedByteBuffer mapBuf = null;
-    FileChannel fc = null;
-
-    //private volatile  boolean sendOver = false;
-
-
-    public MessageWriter(KeyValue properties, String fileName) {
-        this.properties = properties;
-        this.fileName = fileName;
+    public MessageWriter(String store_path) {
+        this.STORE_PATH = store_path;
         mq = new LinkedBlockingQueue<>(MQ_CAPACITY);
-        bytesJar = new byte[BUFFER_SIZE];
+        indexTable = new HashMap<>();
+        indexBuf = ByteBuffer.allocate(130);
+    }
+    public void run() {
+        producerId = Thread.currentThread().getName();
+        String msgFilePath = STORE_PATH + "/" + producerId;
+        RandomAccessFile raf = null;
+
+        try {
+            raf = new RandomAccessFile(msgFilePath, "rw");
+            messageChannel = raf.getChannel();
+            messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        while (true) {
+            try {
+                DefaultBytesMessage message = (DefaultBytesMessage)mq.take();
+                if (new String(message.getBody()).equals(""))   break;
+                KeyValue property = message.properties();
+                KeyValue header = message.headers();
+                String queueOrTopic;
+                if (header.containsKey(MessageHeader.QUEUE))
+                    queueOrTopic = header.getString(MessageHeader.QUEUE);
+                else
+                    queueOrTopic = header.getString(MessageHeader.TOPIC);
+
+                queueOrTopic = queueOrTopic.substring(1);
+                if (!indexTable.containsKey(queueOrTopic))
+                    createIndexFile(queueOrTopic);
+
+                byte[] propertyBytes = getKvsBytes(property);
+                byte[] headerBytes = getKvsBytes(header);
+                byte[] body = message.getBody();
+                fill(propertyBytes, 'p');
+                fill(headerBytes, 'h');
+                fill(body, 'b');
+
+                // add index
+                long start = seat;
+                int offset = propertyBytes.length + headerBytes.length + body.length;
+                addIndex(queueOrTopic, start, offset);
+                seat += offset + 1; // 跳过'\n'
 
 
-        // 初始化fileChannel
+            } catch (InterruptedException e) { e.printStackTrace();}
+        }
     }
 
-    /*
-    public  void dump() {
-       sendOver = true;
+    public void fill(byte[] component, char flag) {
+        if (flag == 'p' || flag == 'h') {
+            if (messageBuf.position() + component.length > BUFFER_SIZE) {
+                int k = BUFFER_SIZE - messageBuf.position();
+                messageBuf.put(component, 0, k);
+                try {
+                    fileCursor += BUFFER_SIZE;
+                    messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
+                } catch (IOException e) { e.printStackTrace();}
+                messageBuf.put(component, k, component.length - k);
+            }
+            else
+                messageBuf.put(component);
+        }
+        else {
+            if (messageBuf.position() + component.length + 1 > BUFFER_SIZE) {
+                int k = BUFFER_SIZE - messageBuf.position();
+                messageBuf.put(component, 0, k);
+                try {
+                    fileCursor += BUFFER_SIZE;
+                    messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
+                } catch (IOException e) { e.printStackTrace();}
+                if (k < component.length)
+                    messageBuf.put(component, k, component.length - k);
+                messageBuf.put((byte)('\n'));
+            }
+            else {
+                messageBuf.put(component);
+                messageBuf.put((byte)('\n'));
+            }
+        }
     }
-    */
 
+    public void createIndexFile(String bucket) {
+        String absPath = STORE_PATH+"/" + producerId + "_" + bucket;
+        RandomAccessFile raf = null;
+        try {
+            raf = new RandomAccessFile(absPath, "rw");
+            FileChannel fc = raf.getChannel();
+            indexTable.put(bucket, fc);
+        } catch (IOException e) { e.printStackTrace();}
+    }
 
+    public byte[] getKvsBytes(KeyValue kvs) {
+        return ((DefaultKeyValue)kvs).getBytes();
+    }
 
+    public void addIndex(String bucket, long start, int offset) {
+        /*
+        byte[] startBytes = Long.toString(start).getBytes();
+        byte[] endBytes = Long.toString(start+offset).getBytes();
+        indexBuf.put(startBytes);
+        indexBuf.put((byte)('#'));
+        indexBuf.put(endBytes);
+        indexBuf.put((byte)('\n'));
+        indexBuf.flip();
+        */
+
+        indexBuf.putLong(start);
+        indexBuf.put((byte)('#'));
+        indexBuf.putLong(start + offset);
+        indexBuf.put((byte)('\n'));
+        indexBuf.flip();
+
+        FileChannel fc = indexTable.get(bucket);
+        try {
+            fc.write(indexBuf);
+        } catch (IOException e) { e.printStackTrace();}
+        indexBuf.clear();
+    }
 
     public void addMessage(Message message) {
         try {
             mq.put(message);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        } catch (InterruptedException e) { e.printStackTrace();}
     }
-
-
-
-
-
-
-
-
-// 后分佩buffer
-    public void fill(byte[] component, String name) {
-        if (name.equals("property") || name.equals("header")) {
-            if (jarCursor + component.length > BUFFER_SIZE) {
-                // 第一部分
-                /*
-                int k = 0;
-                for (; jarCursor < BUFFER_SIZE;)
-                    bytesJar[jarCursor++] = component[k++];
-                    */
-                int k = BUFFER_SIZE - jarCursor;
-                System.arraycopy(component, 0, bytesJar, jarCursor, k);
-                jarCursor += k;
-                try {
-                    mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-                mapBuf.put(bytesJar);
-
-                // 更新文件指针和容器内的指针
-                fileCursor += BUFFER_SIZE;
-                jarCursor = 0;
-
-                // 第二部分
-                /*
-                for(; k < component.length;)
-                    bytesJar[jarCursor++] = component[k++];
-                    */
-                System.arraycopy(component, k, bytesJar, jarCursor, component.length-k);
-                jarCursor += component.length-k;
-            } else{
-                /*
-                int k = 0;
-                for (; k < component.length; )
-                    bytesJar[jarCursor++] = component[k++];
-                */
-                System.arraycopy(component, 0, bytesJar, jarCursor, component.length);
-                jarCursor += component.length;
-
-            }
-        }
-
-        else {
-
-            if (jarCursor + component.length + 1 > BUFFER_SIZE) {
-                /*
-                int k = 0;
-                for (; jarCursor < BUFFER_SIZE;)
-                    bytesJar[jarCursor++] = component[k++];
-                */
-                int k = BUFFER_SIZE - jarCursor;
-                System.arraycopy(component, 0, bytesJar, jarCursor, k);
-                jarCursor += k;
-                try {
-                    mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
-                } catch (IOException e) { e.printStackTrace(); }
-
-                mapBuf.put(bytesJar);
-
-                // 更新文件指针和容器内的指针
-                fileCursor += BUFFER_SIZE;
-                jarCursor = 0;
-
-                /*
-                for (; k < component.length;)
-                    bytesJar[jarCursor++] = component[k++];
-                */
-                System.arraycopy(component, k, bytesJar, jarCursor, component.length - k);
-                jarCursor += component.length - k;
-
-                bytesJar[jarCursor++] = (byte)('\n');   // 分隔符
-            } else {
-                /*
-                int k = 0;
-                for (; k < component.length;)
-                    bytesJar[jarCursor++] = component[k++];
-                */
-                System.arraycopy(component, 0, bytesJar, jarCursor, component.length);
-                jarCursor += component.length;
-                bytesJar[jarCursor++] = (byte)('\n');   // 分隔符
-            }
-        }
-    }
-
-
-
-
-
-
-    public byte[] getKeyValueBytes(KeyValue map) {
-        return ((DefaultKeyValue)map).getBytes();
-
-        /*
-        StringBuilder sb = new StringBuilder();
-        DefaultKeyValue kvs = (DefaultKeyValue)map;
-        for (String key: kvs.keySet()) {
-            sb.append(key);
-            sb.append('#');
-            sb.append(kvs.getValue(key));
-            sb.append('|');
-        }
-        sb.deleteCharAt(sb.length()-1);
-        sb.append(',');
-        return sb.toString().getBytes();
-        */
-    }
-
-    public void run() {
-        String absPath = properties.getString("STORE_PATH")+ "/" + fileName.substring(1);
-        RandomAccessFile raf = null;
-        try {
-            raf = new RandomAccessFile(absPath, "rw");
-            fc = raf.getChannel();
-            //mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);   // TODO 待删除
-            while (true) {
-                BytesMessage message = (BytesMessage)mq.take();
-                if (new String(message.getBody()).equals("")) {
-                    break;
-                }
-
-                byte[] propertyBytes = getKeyValueBytes(message.properties());
-                byte[] headerBytes = getKeyValueBytes(message.headers());
-                byte[] body = message.getBody();
-
-                // 注意填充的先后顺序
-                fill(propertyBytes, "property");
-                fill(headerBytes, "header");
-                fill(body, "body");
-
-            }
-
-
-            while (!mq.isEmpty()) {  // 这时候可以不要考虑线程安全了
-                BytesMessage  message = (BytesMessage)mq.remove();
-                if (new String(message.getBody()).equals("")) {
-                    // System.out.println();
-                    break;
-                }
-                byte[] propertyBytes = getKeyValueBytes(message.properties());
-                byte[] headerBytes = getKeyValueBytes(message.headers());
-                byte[] body = message.getBody();
-
-
-                // 注意填充的先后顺序
-                fill(propertyBytes, "property");
-                fill(headerBytes, "header");
-                fill(body, "body");
-
-            }
-
-
-            if (jarCursor > 0) {
-                //mapBuf.put(bytesJar, 0, jarCursor);
-                try {
-                    mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, jarCursor);
-                    mapBuf.put(bytesJar, 0, jarCursor);
-                } catch (IOException e) { e.printStackTrace();}
-                finally {
-                    if (fc != null) {
-                        fc.close();
-                    }
-                }
-
-            }
-
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
-
-
-
 
 
 }
+

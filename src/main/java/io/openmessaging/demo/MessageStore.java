@@ -1,112 +1,157 @@
 package io.openmessaging.demo;
 
-import io.openmessaging.KeyValue;
+import com.sun.org.apache.bcel.internal.generic.INSTANCEOF;
 import io.openmessaging.Message;
-import io.openmessaging.MessageHeader;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Created by lee on 5/16/17.
+ * Created by lee on 5/29/17.
  */
 public class MessageStore {
-    private KeyValue properties;
-    private static volatile  MessageStore INSTANCE = null;
 
-    private ConcurrentHashMap<String, MessageWriter> writerTable = new ConcurrentHashMap<>();
+     Map<String , FileChannel> fcTable = null;
+     Map<String, MappedByteBuffer> mapBufTable = null;
+     Map<String, Long> curSorTable = null;
+     private final int BUFFER_SIZE  =  1024 * 1024;
+     private static volatile  MessageStore INSTANCE = null;
 
-    private static AtomicInteger numOfProducer = new AtomicInteger(0);
-    private static AtomicInteger finishCnt = new AtomicInteger(0);
 
+    private MessageStore() {
+        fcTable = new HashMap<>();
+        mapBufTable = new HashMap<>();
+        curSorTable = new HashMap<>();
+    }
 
-    public static MessageStore getInstance(KeyValue properties) {
-        numOfProducer.incrementAndGet();    //　统计生产者数目
-        if (INSTANCE  == null) {
+    /*
+    private static class LazyHolder {
+        static final MessageStore INSTANCE = new MessageStore();
+    }
+    */
+    public static MessageStore getInstance() {
+        if (INSTANCE == null) {
             synchronized (MessageStore.class) {
-                if (INSTANCE == null)
-                    INSTANCE = new MessageStore(properties);
+                if (INSTANCE == null) {
+                    INSTANCE = new MessageStore();
+                }
             }
         }
         return INSTANCE;
     }
 
-    public MessageStore(KeyValue properties) {
-        this.properties = properties;
-    }
 
-    public  void finishCount() {    //TODO: 同步关键字待删除
-        int cnt = finishCnt.incrementAndGet();
-
-        // /*
-        if (cnt == numOfProducer.get()) {
-            synchronized (finishCnt) {
-                if (cnt == numOfProducer.get()) {
-                    // 通知所有线程清空容器和队列    由最后一个线程完成
-                    DefaultMessageFactory messageFactory = new DefaultMessageFactory();
-                    for(String bucket: writerTable.keySet()) {
-                        Message msg = messageFactory.createBytesMessageToQueue("", "".getBytes());
-                        writerTable.get(bucket).addMessage(msg);
-
-                    }
-                }
-            }
-        }
-        // */
-
-        /*
-        synchronized (finishCnt) {
-            if (cnt == numOfProducer.get()) {
-                // 通知所有线程清空容器和队列    由最后一个线程完成
-                DefaultMessageFactory messageFactory = new DefaultMessageFactory();
-                for(String bucket: writerTable.keySet()) {
-                    Message msg = messageFactory.createBytesMessageToQueue("", "".getBytes());
-                    writerTable.get(bucket).addMessage(msg);
-
+    public synchronized void insertFile(String storePath, String bucket) {
+         /*
+        if (!fcTable.containsKey(bucket)) {
+            synchronized (this) {
+                if (!fcTable.containsKey(bucket)) {
+                    String absPath = storePath + "/" + bucket;
+                    RandomAccessFile raf = null;
+                    try {
+                        raf = new RandomAccessFile(absPath, "rw");
+                        FileChannel fc = raf.getChannel();
+                        MappedByteBuffer mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, BUFFER_SIZE);
+                        fcTable.put(bucket,fc);
+                        mapBufTable.put(bucket, mapBuf);
+                        curSorTable.put(bucket, 0L);
+                    } catch (IOException e) { e.printStackTrace();}
                 }
             }
         }
         */
-
-
-    }
-
-
-
-    public  void putMessage(Message message) { // 同步关键字不能去
-        try {
-            String queueOrTopic = message.headers().getString(MessageHeader.QUEUE);
-            if (queueOrTopic == null)
-                queueOrTopic = message.headers().getString(MessageHeader.TOPIC);
-            if (queueOrTopic == null || queueOrTopic.length() == 0)
-                throw new Exception("Queue or Topic is empty");
-
-
-
-          //  /*
-            if(!writerTable.containsKey(queueOrTopic)) {
-                synchronized (this) {
-                   // System.out.println("aa");
-                    MessageWriter messageWriter = writerTable.get(queueOrTopic);
-                    if (messageWriter == null) {    // TODO 这里有隐患
-                        messageWriter = new MessageWriter(properties, queueOrTopic);
-                        writerTable.put(queueOrTopic, messageWriter);
-                        new Thread(messageWriter).start();
-                    }
-                }
-           }
-//*/
-
-            writerTable.get(queueOrTopic).addMessage(message);
-
-
-        } catch(InterruptedException e) {
-            e.printStackTrace();
-        } catch(Exception e) {
-            System.out.println("Queue or Topic is empty");
+         if (!fcTable.containsKey(bucket)) {
+             String absPath = storePath + "/" + bucket;
+             RandomAccessFile raf = null;
+             try {
+                 raf = new RandomAccessFile(absPath, "rw");
+                 FileChannel fc = raf.getChannel();
+                 MappedByteBuffer mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, BUFFER_SIZE);
+                 fcTable.put(bucket,fc);
+                 mapBufTable.put(bucket, mapBuf);
+                 curSorTable.put(bucket, 0L);
+             } catch (IOException e) { e.printStackTrace();}
+         }
+        /*
+        synchronized (this) {
+            if (!fcTable.containsKey(bucket)) {
+                String absPath = storePath + "/" + bucket;
+                RandomAccessFile raf = null;
+                try {
+                    raf = new RandomAccessFile(absPath, "rw");
+                    FileChannel fc = raf.getChannel();
+                    MappedByteBuffer mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, BUFFER_SIZE);
+                    fcTable.put(bucket,fc);
+                    mapBufTable.put(bucket, mapBuf);
+                    curSorTable.put(bucket, 0L);
+                } catch (IOException e) { e.printStackTrace();}
+            }
         }
-
+        */
+        /*
+        String absPath = storePath + "/" + bucket;
+        RandomAccessFile raf = null;
+        try {
+            raf = new RandomAccessFile(absPath, "rw");
+            FileChannel fc = raf.getChannel();
+            MappedByteBuffer mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, BUFFER_SIZE);
+            fcTable.put(bucket,fc);
+            mapBufTable.put(bucket, mapBuf);
+            curSorTable.put(bucket, 0L);
+        } catch (IOException e) { e.printStackTrace();}
+        */
     }
+
+    /*
+    public synchronized  void fill(byte[] component, String bucket, String name) {
+        FileChannel fc = fcTable.get(bucket);
+        MappedByteBuffer mapBuf = mapBufTable.get(bucket);
+        Long fileCursor = curSorTable.get(bucket);
+        if (name.equals("property") || name.equals("header")) {
+            if (mapBuf.position() + component.length > BUFFER_SIZE) {
+                // 放入第一部分
+                int k = BUFFER_SIZE - mapBuf.position();
+                mapBuf.put(component, 0, k);
+                try {
+                    fileCursor += BUFFER_SIZE;
+                    mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
+                } catch (IOException e) { e.printStackTrace(); }
+
+                mapBuf.put(component, k, component.length - k);
+            }
+            else {
+                mapBuf.put(component);
+            }
+        }
+        else {
+            if (mapBuf.position() + component.length + 1 > BUFFER_SIZE) {
+                int k = BUFFER_SIZE - mapBuf.position();
+                mapBuf.put(component, 0, k);
+                try {
+                    fileCursor += BUFFER_SIZE;
+                    mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
+                } catch (IOException e) { e.printStackTrace();}
+                if (k < component.length)
+                    mapBuf.put(component, k, component.length - k);
+                mapBuf.put((byte)('\n'));   //插入分隔符
+            }
+            else {
+                mapBuf.put(component);
+                mapBuf.put((byte)('\n'));
+            }
+        }
+    }
+    */
+
+
+
+
+
+
 }

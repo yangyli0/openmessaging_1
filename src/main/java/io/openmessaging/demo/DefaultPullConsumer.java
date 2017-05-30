@@ -46,6 +46,7 @@ public class DefaultPullConsumer implements PullConsumer{
 
 
     public  Message pullMessage(String bucket) {
+        /*
         Message message = null;
         if (!messageFileMap.containsKey(bucket))
             messageFileMap.put(bucket, new MessageFile(properties, bucket));
@@ -69,6 +70,55 @@ public class DefaultPullConsumer implements PullConsumer{
 
         byte[] msgBytes = null;
         int i = mapBuf.position();
+        for (; i < mapBuf.capacity() && mapBuf.get(i) != 10; i++);
+
+        if (i >= mapBuf.capacity()) {   // 跨越两个buffer
+            //bookkeeper.increaseBufIndex();  // 不用考虑越界
+            int otherBufIndex = curBufIndex + 1;
+
+            consumeRecord.put(bucket, ++curBufIndex);
+            MappedByteBuffer otherMapBuf = msgFile.getMapBufList().get(otherBufIndex);
+            int w = otherMapBuf.position();
+            for(; otherMapBuf.get(w) != 10; w++);
+            int firstLen = i - mapBuf.position();
+            int secondLen = w;  // 省去－０
+            msgBytes = new byte[firstLen + secondLen];
+
+            mapBuf.get(msgBytes, 0, firstLen);
+            otherMapBuf.get(msgBytes, firstLen, secondLen);
+
+            otherMapBuf.get();  //跳过'\n'
+        }
+        else {
+            msgBytes = new byte[i - mapBuf.position()];
+            mapBuf.get(msgBytes, 0, i-mapBuf.position());
+            mapBuf.get();   // 跳过'\n'
+        }
+
+
+        return assemble(msgBytes);
+        */
+        Message message = null;
+        if (!messageFileMap.containsKey(bucket))
+            messageFileMap.put(bucket, new MessageFile(properties, bucket));
+        if (!consumeRecord.containsKey(bucket))
+            consumeRecord.put(bucket, 0);
+
+        MessageFile msgFile = messageFileMap.get(bucket);
+
+        int curBufIndex = consumeRecord.get(bucket);
+        MappedByteBuffer mapBuf = msgFile.getMapBufList().get(curBufIndex);
+
+        if (mapBuf.position() == mapBuf.capacity()) {
+            if (++curBufIndex >= msgFile.getMapBufList().size()) return null;
+            consumeRecord.put(bucket, curBufIndex);
+
+            mapBuf = msgFile.getMapBufList().get(curBufIndex);
+        }
+
+        byte[] msgBytes = null;
+        int i = mapBuf.position();
+        if (i < mapBuf.capacity() && mapBuf.get(i) == 0)    return null;
         for (; i < mapBuf.capacity() && mapBuf.get(i) != 10; i++);
 
         if (i >= mapBuf.capacity()) {   // 跨越两个buffer
