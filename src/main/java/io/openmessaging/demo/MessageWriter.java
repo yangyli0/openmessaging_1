@@ -22,7 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 
 public class MessageWriter implements Runnable {
-    private final int BUFFER_SIZE =  256 * 1024 * 1024;
+    private final int BUFFER_SIZE =  1024 * 1024 * 1024;
     private final int MQ_CAPACITY = 10000;
     private String producerId;
     private BlockingQueue<Message> mq;
@@ -33,13 +33,16 @@ public class MessageWriter implements Runnable {
     private FileChannel messageChannel;
     private String STORE_PATH;
     private long seat = 0;
+    //private Map<String, Integer> bucketMap;
+    private int counter = 0;
 
     public MessageWriter(String store_path) {
         this.STORE_PATH = store_path;
         mq = new LinkedBlockingQueue<>(MQ_CAPACITY);
 
-        indexTable = new HashMap<>();
-        indexBuf = ByteBuffer.allocate(130);
+        //indexTable = new HashMap<>();
+        //indexBuf = ByteBuffer.allocate(130);
+       // bucketMap = new HashMap<>(100); // queue 和topic的总数
 
     }
     public void run() {
@@ -69,23 +72,35 @@ public class MessageWriter implements Runnable {
 
                 queueOrTopic = queueOrTopic.substring(1);
 
+                /*
                 if (!indexTable.containsKey(queueOrTopic))
                     createIndexFile(queueOrTopic);
+                */
+
 
 
                 byte[] propertyBytes = getKvsBytes(property);
                 byte[] headerBytes = getKvsBytes(header);
                 byte[] body = message.getBody();
+                /*
+                if (!bucketMap.containsKey(queueOrTopic))
+                    bucketMap.put(queueOrTopic, counter++);
+                int rank = bucketMap.get(queueOrTopic); // 得到topic对应的编号
+                */
+                int len = propertyBytes.length + headerBytes.length + body.length;
+                byte[] tagBytes = (queueOrTopic +"," +len+",").getBytes();
+                fill(tagBytes, 't');
                 fill(propertyBytes, 'p');
                 fill(headerBytes, 'h');
                 fill(body, 'b');
 
                 // add index
-
+                /*
                 long start = seat;
                 int offset = propertyBytes.length + headerBytes.length + body.length;
                 addIndex(queueOrTopic, start, offset);
                 seat += offset + 1; // 跳过'\n'
+                */
 
 
 
@@ -94,7 +109,7 @@ public class MessageWriter implements Runnable {
     }
 
     public void fill(byte[] component, char flag) {
-        if (flag == 'p' || flag == 'h') {
+        if (flag == 't' || flag == 'p' || flag == 'h') {
             if (messageBuf.position() + component.length > BUFFER_SIZE) {
                 int k = BUFFER_SIZE - messageBuf.position();
                 messageBuf.put(component, 0, k);
@@ -126,6 +141,7 @@ public class MessageWriter implements Runnable {
         }
     }
 
+    /*
     public void createIndexFile(String bucket) {
         String absPath = STORE_PATH+"/" + producerId + "_" + bucket;
         RandomAccessFile raf = null;
@@ -135,6 +151,7 @@ public class MessageWriter implements Runnable {
             indexTable.put(bucket, fc);
         } catch (IOException e) { e.printStackTrace();}
     }
+    */
 
 
     public byte[] getKvsBytes(KeyValue kvs) {
