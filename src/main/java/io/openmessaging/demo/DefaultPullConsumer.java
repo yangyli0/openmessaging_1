@@ -5,7 +5,7 @@ import io.openmessaging.Message;
 import io.openmessaging.MessageHeader;
 import io.openmessaging.PullConsumer;
 
-import java.io.File;
+
 import java.nio.MappedByteBuffer;
 import java.util.*;
 
