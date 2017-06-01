@@ -3,11 +3,9 @@ package io.openmessaging.demo;
 import io.openmessaging.*;
 
 
-
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.HashMap;
@@ -22,173 +20,160 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 
 public class MessageWriter implements Runnable {
-    private final int BUFFER_SIZE =  1024 * 1024 * 1024;
-    private final int MQ_CAPACITY = 10000;
-    private String producerId;
+    private KeyValue properties;
+
+    private final int MQ_CAPACITY = 1000;
     private BlockingQueue<Message> mq;
-    private ByteBuffer indexBuf;
-    private Map<String, FileChannel> indexTable;
-    private long fileCursor = 0;
-    private MappedByteBuffer messageBuf;
-    private FileChannel messageChannel;
-    private String STORE_PATH;
-    private long seat = 0;
-    //private Map<String, Integer> bucketMap;
-    private int counter = 0;
 
-    public MessageWriter(String store_path) {
-        this.STORE_PATH = store_path;
+    private final int BUFFER_SIZE = 512 * 1024 * 1024;  // TODO: 尝试256
+    private FileChannel fc;
+    private MappedByteBuffer mapBuf;
+    private String producerId;
+
+    private Map<String, Integer> slotSeat;    //记录当前消息的位置和长度
+    private Map<String, MetaInfo> firstMsgMeta; //记录第一条消息的位置和长度，　落盘用
+
+    private int msgLen; // 记录当前消息的长度
+
+
+    public MessageWriter(KeyValue properties) {
+        this.properties = properties;
         mq = new LinkedBlockingQueue<>(MQ_CAPACITY);
-
-        //indexTable = new HashMap<>();
-        //indexBuf = ByteBuffer.allocate(130);
-       // bucketMap = new HashMap<>(100); // queue 和topic的总数
-
+        slotSeat = new HashMap<>();
+        firstMsgMeta = new HashMap<>();
     }
+
     public void run() {
         producerId = Thread.currentThread().getName();
-        String msgFilePath = STORE_PATH + "/" + producerId;
+        String absPath = properties.getString("STORE_PATH") + "/" + producerId;
         RandomAccessFile raf = null;
-
         try {
-            raf = new RandomAccessFile(msgFilePath, "rw");
-            messageChannel = raf.getChannel();
-            messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+            raf = new RandomAccessFile(absPath, "rw");
+            fc = raf.getChannel();
+            mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, BUFFER_SIZE);    // TODO:保证只映射一次
+        } catch (IOException e) { e.printStackTrace();}
 
         while (true) {
             try {
-                DefaultBytesMessage message = (DefaultBytesMessage)mq.take();
+                DefaultBytesMessage message = (DefaultBytesMessage) mq.take();
                 if (new String(message.getBody()).equals(""))   break;
+
                 KeyValue property = message.properties();
                 KeyValue header = message.headers();
-                String queueOrTopic;
-                if (header.containsKey(MessageHeader.QUEUE))
-                    queueOrTopic = header.getString(MessageHeader.QUEUE);
-                else
-                    queueOrTopic = header.getString(MessageHeader.TOPIC);
 
-                queueOrTopic = queueOrTopic.substring(1);
-
-                /*
-                if (!indexTable.containsKey(queueOrTopic))
-                    createIndexFile(queueOrTopic);
-                */
-
-
-
+                // 写消息
                 byte[] propertyBytes = getKvsBytes(property);
-                byte[] headerBytes = getKvsBytes(header);
+                byte[] headerBytes =getKvsBytes(header);
                 byte[] body = message.getBody();
-                /*
-                if (!bucketMap.containsKey(queueOrTopic))
-                    bucketMap.put(queueOrTopic, counter++);
-                int rank = bucketMap.get(queueOrTopic); // 得到topic对应的编号
-                */
-                int len = propertyBytes.length + headerBytes.length + body.length;
-                byte[] tagBytes = (queueOrTopic +"," +len+",").getBytes();
-                fill(tagBytes, 't');
+                msgLen = propertyBytes.length + headerBytes.length + body.length;
+
                 fill(propertyBytes, 'p');
                 fill(headerBytes, 'h');
                 fill(body, 'b');
 
-                // add index
-                /*
-                long start = seat;
-                int offset = propertyBytes.length + headerBytes.length + body.length;
-                addIndex(queueOrTopic, start, offset);
-                seat += offset + 1; // 跳过'\n'
-                */
 
+                String queueOrTopic;
+                if (header.containsKey(MessageHeader.TOPIC))
+                    queueOrTopic = header.getString(MessageHeader.TOPIC);
+                else
+                    queueOrTopic = header.getString(MessageHeader.QUEUE);
 
+                queueOrTopic = queueOrTopic.substring(1);
+
+                if (!slotSeat.containsKey(queueOrTopic)) {  // 关于该topic的第一条消息
+                    int cursor = mapBuf.position();
+                    slotSeat.put(queueOrTopic, cursor-8);   // 指向槽的起始位置
+
+                    MetaInfo metaInfo = new MetaInfo(cursor-msgLen-8, msgLen);
+                    firstMsgMeta.put(queueOrTopic, metaInfo);
+                }
+
+                else {
+                    int slot = slotSeat.get(queueOrTopic);
+                    int cursor = mapBuf.position(); // 写过消息(包括两个空位)的后位置,
+                    // 填槽
+                    mapBuf.position(slot);
+                    mapBuf.putInt(cursor - msgLen - 8);
+                    mapBuf.putInt(msgLen);
+                    // 将指针恢复到写完消息后的位置
+                    mapBuf.position(cursor);
+                    // 更新槽位置
+                    slotSeat.put(queueOrTopic, cursor-8);   // 下一个待填槽的位置
+                }
 
             } catch (InterruptedException e) { e.printStackTrace();}
+        }
+
+        // 将firstMsgSeat写盘
+        String seatFilePath = properties.getString("STORE_PATH") + "/" + "seatFile-" + producerId;
+        byte[] mapBytes = getMapBytes(firstMsgMeta);
+
+        try {
+            raf = new RandomAccessFile(seatFilePath, "rw");
+            fc = raf.getChannel();
+            mapBuf = fc.map(FileChannel.MapMode.READ_WRITE, 0, mapBytes.length);
+        } catch (IOException e) { e.printStackTrace();}
+        mapBuf.put(mapBytes);
+    }
+
+    public void addMessage(Message message) {
+        try {
+            mq.put(message);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 
     public void fill(byte[] component, char flag) {
-        if (flag == 't' || flag == 'p' || flag == 'h') {
-            if (messageBuf.position() + component.length > BUFFER_SIZE) {
-                int k = BUFFER_SIZE - messageBuf.position();
-                messageBuf.put(component, 0, k);
-                try {
-                    fileCursor += BUFFER_SIZE;
-                    messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
-                } catch (IOException e) { e.printStackTrace();}
-                messageBuf.put(component, k, component.length - k);
-            }
-            else
-                messageBuf.put(component);
-        }
-        else {
-            if (messageBuf.position() + component.length + 1 > BUFFER_SIZE) {
-                int k = BUFFER_SIZE - messageBuf.position();
-                messageBuf.put(component, 0, k);
-                try {
-                    fileCursor += BUFFER_SIZE;
-                    messageBuf = messageChannel.map(FileChannel.MapMode.READ_WRITE, fileCursor, BUFFER_SIZE);
-                } catch (IOException e) { e.printStackTrace();}
-                if (k < component.length)
-                    messageBuf.put(component, k, component.length - k);
-                messageBuf.put((byte)('\n'));
-            }
-            else {
-                messageBuf.put(component);
-                messageBuf.put((byte)('\n'));
-            }
+        mapBuf.put(component);
+        if (flag == 'b') {
+            mapBuf.putInt(-1);  // 添加占位符
+            mapBuf.putInt(-1);
         }
     }
-
-    /*
-    public void createIndexFile(String bucket) {
-        String absPath = STORE_PATH+"/" + producerId + "_" + bucket;
-        RandomAccessFile raf = null;
-        try {
-            raf = new RandomAccessFile(absPath, "rw");
-            FileChannel fc = raf.getChannel();
-            indexTable.put(bucket, fc);
-        } catch (IOException e) { e.printStackTrace();}
-    }
-    */
-
 
     public byte[] getKvsBytes(KeyValue kvs) {
         return ((DefaultKeyValue)kvs).getBytes();
     }
 
-
-    public void addIndex(String bucket, long start, int offset) {
-        /*
-        byte[] startBytes = Long.toString(start).getBytes();
-        byte[] endBytes = Long.toString(start+offset).getBytes();
-        indexBuf.put(startBytes);
-        indexBuf.put((byte)('#'));
-        indexBuf.put(endBytes);
-        */
-
-        indexBuf.putLong(start);
-        indexBuf.put((byte)('#'));
-        indexBuf.putLong(start + offset);
-
-        indexBuf.put((byte)('\n'));
-        indexBuf.flip();
-
-        FileChannel fc = indexTable.get(bucket);
-        try {
-            fc.write(indexBuf);
-        } catch (IOException e) { e.printStackTrace();}
-        indexBuf.clear();
+    public byte[] getMapBytes(Map<String, MetaInfo> map) {
+        StringBuilder sb = new StringBuilder();
+        for(Map.Entry<String, MetaInfo> entry : map.entrySet()) {
+            sb.append(entry.getKey());
+            sb.append(':');
+            sb.append(entry.getValue().offset);
+            sb.append('#');
+            sb.append(entry.getValue().length);
+            sb.append(',');
+        }
+        return sb.toString().getBytes();
     }
 
 
-    public void addMessage(Message message) {
-        try {
-            mq.put(message);
-        } catch (InterruptedException e) { e.printStackTrace();}
-    }
+
 
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
