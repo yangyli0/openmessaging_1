@@ -24,7 +24,7 @@ public class MessageBroker {
     File[] seatFiles;
     Map<String, List<Triple>> bucketStartInfo = null;
 
-    private MessageBroker(KeyValue properties)  {
+    public MessageBroker(KeyValue properties)  {
         this.properties = properties;
         bucketStartInfo = new HashMap<>();
         getFileSet();

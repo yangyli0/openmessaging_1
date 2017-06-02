@@ -23,13 +23,14 @@ public class DefaultPullConsumer implements PullConsumer{
     private Map<String, MessageFile> messageFileMap = null;
     private MessageBroker messageBroker;
 
-    private Map<String, List<Triple>> bookkeeper;
+    //private Map<String, List<Triple>> bookkeeper;
 
 
     public DefaultPullConsumer(KeyValue properties) {
         this.properties = properties;
-        messageBroker = MessageBroker.getInstance(properties);
-        bookkeeper = new HashMap<>(messageBroker.bucketStartInfo);
+        //messageBroker = MessageBroker.getInstance(properties);
+        //bookkeeper = new HashMap<>(messageBroker.bucketStartInfo);
+        messageBroker = new MessageBroker(properties);
 
         messageFileMap = new HashMap<>(messageBroker.producerList.size());
     }
@@ -55,8 +56,8 @@ public class DefaultPullConsumer implements PullConsumer{
 
     public Message pullMessage(String bucket) {
         Message message = null;
-        //List<Triple> triples = messageBroker.bucketStartInfo.get(bucket);
-        List<Triple> triples = bookkeeper.get(bucket);
+        List<Triple> triples = messageBroker.bucketStartInfo.get(bucket);
+        //List<Triple> triples = bookkeeper.get(bucket);
         while (curProducer < triples.size()) {
             Triple triple = triples.get(curProducer);
             message = getMessage(triple);
