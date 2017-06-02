@@ -156,7 +156,7 @@ public class DefaultPullConsumer implements PullConsumer{
 
     @Override public Message poll(KeyValue properties) { throw new UnsupportedOperationException("Unsupported"); }
 
-    @Override public synchronized void attachQueue(String queueName, Collection<String> topics) {   //TODO:同步关键字可去
+    @Override public  void attachQueue(String queueName, Collection<String> topics) {   //TODO:同步关键字可去
         if (queue != null && !queue.equals(queueName))
             throw new ClientOMSException("You have already attached to a queue: " + queue);
         queue = queueName;
