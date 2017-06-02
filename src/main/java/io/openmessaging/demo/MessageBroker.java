@@ -17,7 +17,8 @@ import java.util.Map;
  */
 public class MessageBroker {
     private KeyValue properties;
-    private volatile  static MessageBroker INSTANCE = null;
+    private static volatile MessageBroker INSTANCE = null;
+    private static int instanceCnt = 0;
 
     List<String> producerList = new ArrayList<>();
     File[] seatFiles;
@@ -83,6 +84,7 @@ public class MessageBroker {
             synchronized (MessageBroker.class) {
                 if (INSTANCE == null)
                     INSTANCE  = new MessageBroker(properties);
+                    instanceCnt++;
             }
         }
         return INSTANCE;

@@ -23,10 +23,14 @@ public class DefaultPullConsumer implements PullConsumer{
     private Map<String, MessageFile> messageFileMap = null;
     private MessageBroker messageBroker;
 
+    private Map<String, List<Triple>> bookkeeper;
+
 
     public DefaultPullConsumer(KeyValue properties) {
         this.properties = properties;
         messageBroker = MessageBroker.getInstance(properties);
+        bookkeeper = new HashMap<>(messageBroker.bucketStartInfo);
+
         messageFileMap = new HashMap<>(messageBroker.producerList.size());
     }
 
@@ -51,8 +55,9 @@ public class DefaultPullConsumer implements PullConsumer{
 
     public Message pullMessage(String bucket) {
         Message message = null;
-        List<Triple> triples = messageBroker.bucketStartInfo.get(bucket);
-        while (curProducer < messageBroker.producerList.size()) {
+        //List<Triple> triples = messageBroker.bucketStartInfo.get(bucket);
+        List<Triple> triples = bookkeeper.get(bucket);
+        while (curProducer < triples.size()) {
             Triple triple = triples.get(curProducer);
             message = getMessage(triple);
             if (message != null) {
@@ -150,18 +155,13 @@ public class DefaultPullConsumer implements PullConsumer{
 
     @Override public Message poll(KeyValue properties) { throw new UnsupportedOperationException("Unsupported"); }
 
-    @Override public synchronized void attachQueue(String queueName, Collection<String> topics) {
+    @Override public synchronized void attachQueue(String queueName, Collection<String> topics) {   //TODO:同步关键字可去
         if (queue != null && !queue.equals(queueName))
             throw new ClientOMSException("You have already attached to a queue: " + queue);
         queue = queueName;
 
         bucketList.addAll(topics);
         bucketList.add(queueName);
-
-        // 初始化
-        //messageFileMap = new ConcurrentHashMap<>(bucketList.size());
-        //consumeRecord = new ConcurrentHashMap<>(bucketList.size());
-
 
     }
 
