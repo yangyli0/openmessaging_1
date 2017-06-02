@@ -17,7 +17,7 @@ import java.util.Map;
  */
 public class MessageBroker {
     private KeyValue properties;
-    private static MessageBroker INSTANCE;
+    private volatile  static MessageBroker INSTANCE = null;
 
     List<String> producerList = new ArrayList<>();
     File[] seatFiles;
@@ -35,19 +35,6 @@ public class MessageBroker {
         String absPath = properties.getString("STORE_PATH");
         File dir = new File(absPath);
 
-        /*
-        File[] producerFiles = dir.listFiles(new FilenameFilter() {
-            @Override
-            public boolean accept(File dir, String name) {
-                return name.startsWith("Thread-");
-            }
-        });
-
-        // 初始化producerList
-        for (File producerFile: producerFiles)
-            producerList.add(producerFile.getName());
-        */
-
         seatFiles = dir.listFiles(new FilenameFilter() {
             @Override
             public boolean accept(File dir, String name) {
@@ -64,6 +51,7 @@ public class MessageBroker {
                 String seatFileName = seatFile.getName();
                 String producerId = seatFileName.substring(9);
                 producerList.add(producerId);
+
                 raf = new RandomAccessFile(seatFile, "r");
                 String line = raf.readLine();
                 parseSeatFile(line, producerId);

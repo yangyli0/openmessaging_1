@@ -30,7 +30,7 @@ public class MessageWriter implements Runnable {
     private MappedByteBuffer mapBuf;
     private String producerId;
 
-    private Map<String, Integer> slotSeat;    //记录当前消息的位置和长度
+    private Map<String, Integer> slotSeat;    //记录下一个要填的槽的位置
     private Map<String, MetaInfo> firstMsgMeta; //记录第一条消息的位置和长度，　落盘用
 
     private int msgLen; // 记录当前消息的长度
@@ -81,10 +81,11 @@ public class MessageWriter implements Runnable {
                 queueOrTopic = queueOrTopic.substring(1);
 
                 if (!slotSeat.containsKey(queueOrTopic)) {  // 关于该topic的第一条消息
-                    int cursor = mapBuf.position();
+                    int cursor = mapBuf.position(); //写过消息后的位置
                     slotSeat.put(queueOrTopic, cursor-8);   // 指向槽的起始位置
 
-                    MetaInfo metaInfo = new MetaInfo(cursor-msgLen-8, msgLen);
+
+                    MetaInfo metaInfo = new MetaInfo(cursor - 8 - msgLen, msgLen);
                     firstMsgMeta.put(queueOrTopic, metaInfo);
                 }
 
@@ -93,8 +94,8 @@ public class MessageWriter implements Runnable {
                     int cursor = mapBuf.position(); // 写过消息(包括两个空位)的后位置,
                     // 填槽
                     mapBuf.position(slot);
-                    mapBuf.putInt(cursor - msgLen - 8);
-                    mapBuf.putInt(msgLen);
+                    mapBuf.putInt(cursor - 8 - msgLen); // 起始位置
+                    mapBuf.putInt(msgLen); //   长度
                     // 将指针恢复到写完消息后的位置
                     mapBuf.position(cursor);
                     // 更新槽位置

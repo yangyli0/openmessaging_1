@@ -19,7 +19,7 @@ public class DefaultPullConsumer implements PullConsumer{
     private int curBucket = 0;
     private int curProducer = 0;    // producer下标
 
-    //private Triple curTriple =  null;
+
     private Map<String, MessageFile> messageFileMap = null;
     private MessageBroker messageBroker;
 
@@ -43,9 +43,9 @@ public class DefaultPullConsumer implements PullConsumer{
                 return message;
             }
             curBucket++;
-            curProducer = 0;
+            curProducer = 0;    // 开启新的bucket，从第一个生产者开始消费
         }
-        return null;
+        return message;
     }
 
 
