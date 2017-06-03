@@ -50,7 +50,9 @@ public class MessageBroker {
         for (File seatFile : seatFiles) {
             try {
                 String seatFileName = seatFile.getName();
+                System.out.println(seatFileName);   // 调试用打印日志
                 String producerId = seatFileName.substring(9);
+                System.out.println(producerId); // 调试用，打印日志
                 producerList.add(producerId);
 
                 raf = new RandomAccessFile(seatFile, "r");
