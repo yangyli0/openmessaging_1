@@ -48,7 +48,7 @@ public class DefaultPullConsumer implements PullConsumer{
             message = pullMessage(bucket);
             if (message != null) {
                 msgCnt++;
-                if (msgCnt % 1000000 == 0)
+                if (msgCnt % 10000 == 0)
                     System.out.println(Thread.currentThread().getName()+"  pullNum: " + msgCnt);
                 return message;
             }
