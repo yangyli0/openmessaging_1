@@ -19,6 +19,8 @@ public class DefaultPullConsumer implements PullConsumer{
     private int curBucket = 0;
     private int curProducer = 0;    // producer下标
 
+    private int msgCnt = 0;
+
 
     private Map<String, MessageFile> messageFileMap = null;
     private MessageBroker messageBroker;
@@ -45,6 +47,9 @@ public class DefaultPullConsumer implements PullConsumer{
             String bucket  = bucketList.get(curBucket);
             message = pullMessage(bucket);
             if (message != null) {
+                msgCnt++;
+                if (msgCnt % 1000000 == 0)
+                    System.out.println(Thread.currentThread().getName()+"  pullNum: " + msgCnt);
                 return message;
             }
             curBucket++;
