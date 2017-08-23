@@ -732,7 +732,7 @@ pre {
 </ol>
 <h3>
 <a id="user-content-消费过程" class="anchor" href="#%E6%B6%88%E8%B4%B9%E8%BF%87%E7%A8%8B" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>消费过程</h3>
-<p>1.　每个生产者文件对应一个<code>List&lt;MappedByteBuffer&gt;</code>,　每消费一个topic(queue)需要遍历所有生产者文件。
+<p>1.　每个生产者文件对应一个<code>List&lt;MappedByteBuffer&gt;</code>(<strong>源自</strong><a href="https://github.com/kzx1025/Tianchi-OrderDB/blob/master/src/main/java/com/db/table/BuyerOrderTable.java">出处</a>,这种方式和ByteBuffer相比是很高效的),　每消费一个topic(queue)需要遍历所有生产者文件。
 2. 读的时候类似与<strong>链表</strong>方式，读完一条消息后，根据末尾的下一条消息起始位置和长度，读出下一条消息</p>
 <blockquote>
 <p>写在前面:</p>

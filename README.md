@@ -4,7 +4,7 @@
 2. 每条消息末尾存放，该生产者生产的，关于该topic的下一条消息的起始位置和消息长度(便于消费)
 3. 每条消息写完后，留下8个字节(<code>mapBuffer.putInt(-1)</code>),作为占位符，当写完该消息的下一条消息后，这时已知了下一条消息的起始位置和长度，再回头写入该消息的两个占位符内。整个过程需要记录，待填入offset和位置。
 ### 消费过程
-1.　每个生产者文件对应一个<code>List&lt;MappedByteBuffer&gt;</code>(借鉴自:<https://github.com/kzx1025/Tianchi-OrderDB/blob/master/src/main/java/com/db/table/BuyerOrderTable.java>,这种方式和ByteBuffer相比是很高效的),　每消费一个topic(queue)需要遍历所有生产者文件。
+1.　每个生产者文件对应一个<code>List&lt;MappedByteBuffer&gt;</code>(**源自**[出处](https://github.com/kzx1025/Tianchi-OrderDB/blob/master/src/main/java/com/db/table/BuyerOrderTable.java),这种方式和ByteBuffer相比是很高效的),　每消费一个topic(queue)需要遍历所有生产者文件。
 2. 读的时候类似与**链表**方式，读完一条消息后，根据末尾的下一条消息起始位置和长度，读出下一条消息
 
 
